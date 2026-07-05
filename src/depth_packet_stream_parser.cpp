@@ -51,6 +51,7 @@ DepthPacketStreamParser::DepthPacketStreamParser() :
 
 DepthPacketStreamParser::~DepthPacketStreamParser()
 {
+  processor_->releaseBuffer(packet_);
   delete[] work_buffer_.data;
 }
 
