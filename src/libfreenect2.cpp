@@ -1122,12 +1122,14 @@ PacketPipeline *createDefaultPacketPipeline()
       LOG_WARNING << "`" << pipeline_env << "' pipeline is not available.";
   }
 
-#if defined(LIBFREENECT2_WITH_OPENGL_SUPPORT)
+#if defined(LIBFREENECT2_WITH_METAL_SUPPORT)
+  // Metal is the native GPU API on Apple platforms, where OpenGL is
+  // deprecated; prefer it when built in.
+  return new MetalPacketPipeline();
+#elif defined(LIBFREENECT2_WITH_OPENGL_SUPPORT)
   return new OpenGLPacketPipeline();
 #elif defined(LIBFREENECT2_WITH_CUDA_SUPPORT)
   return new CudaPacketPipeline();
-#elif defined(LIBFREENECT2_WITH_METAL_SUPPORT)
-  return new MetalPacketPipeline();
 #elif defined(LIBFREENECT2_WITH_OPENCL_SUPPORT)
   return new OpenCLPacketPipeline();
 #else
