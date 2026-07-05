@@ -32,7 +32,7 @@ This driver supports:
 Missing features:
 * firmware updates (see [issue #460](https://github.com/OpenKinect/libfreenect2/issues/460) for WiP)
 
-Watch the OpenKinect wiki at www.openkinect.org and the mailing list at https://groups.google.com/forum/#!forum/openkinect for the latest developments and more information about the K4W2 USB protocol.
+Watch the [libfreenect2 wiki](https://github.com/OpenKinect/libfreenect2/wiki) and the mailing list at https://groups.google.com/forum/#!forum/openkinect for the latest developments and more information about the K4W2 USB protocol. (The former openkinect.org domain has lapsed and now serves unrelated ads — do not use it.)
 
 The API reference documentation is provided here https://openkinect.github.io/libfreenect2/.
 
@@ -131,7 +131,7 @@ When you report USB issues, please attach relevant debug log from running the pr
     1. Download CUDA Toolkit and install it. You MUST install the samples too.
 * Install OpenNI2 (optional)
 
-    Download OpenNI 2.2.0.33 (x64) from http://structure.io/openni, install it to default locations (`C:\Program Files...`).
+    Download OpenNI 2.2.0.33 (x64) from https://github.com/structureio/OpenNI2/releases (the former structure.io/openni download page is gone), install it to default locations (`C:\Program Files...`).
 * Build
 
     The default installation path is `install`, you may change it by editing `CMAKE_INSTALL_PREFIX`.
