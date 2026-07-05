@@ -184,6 +184,9 @@ IF(APPLE)
   IF(ENABLE_VIDEOTOOLBOX)
     FIND_LIBRARY(VIDEOTOOLBOX_LIBRARY VideoToolbox)
   ELSE()
+    # FIND_LIBRARY caches its result, so a build dir configured with the
+    # decoder ON would otherwise keep it enabled after -DENABLE_VIDEOTOOLBOX=OFF.
+    UNSET(VIDEOTOOLBOX_LIBRARY CACHE)
     MESSAGE(STATUS "VideoToolbox disabled by ENABLE_VIDEOTOOLBOX=OFF — using TurboJPEG for RGB (required on Apple Silicon / M1+)")
   ENDIF()
 
@@ -359,97 +362,165 @@ SET(HAVE_Metal "disabled (non-Apple)")
 IF(APPLE AND ENABLE_METAL)
   SET(HAVE_Metal no)
 
-  SET(METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/metal_depth_packet_processor.metal")
-  SET(METAL_AIR    "${CMAKE_CURRENT_BINARY_DIR}/metal_depth_packet_processor.air")
-  # Emit the metallib into the library output dir so it sits next to
-  # libfreenect2.dylib — the runtime loader locates it relative to the dylib
-  # (via dladdr), so this makes both the build tree and the install work.
-  SET(METAL_LIB    "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/default.metallib")
-
-  ADD_CUSTOM_COMMAND(
-    OUTPUT ${METAL_AIR}
-    COMMAND xcrun -sdk macosx metal -c ${METAL_SOURCE} -o ${METAL_AIR}
-    DEPENDS ${METAL_SOURCE}
-    COMMENT "Compiling Metal shader to AIR"
-    VERBATIM
+  # The Metal shader compiler ships with full Xcode only, not the standalone
+  # Command Line Tools — degrade gracefully like the other optional backends.
+  EXECUTE_PROCESS(
+    COMMAND xcrun -sdk macosx -f metal
+    RESULT_VARIABLE METAL_COMPILER_RESULT
+    OUTPUT_QUIET
+    ERROR_QUIET
   )
+  IF(METAL_COMPILER_RESULT EQUAL 0)
+    SET(METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/metal_depth_packet_processor.metal")
+    SET(METAL_AIR    "${CMAKE_CURRENT_BINARY_DIR}/metal_depth_packet_processor.air")
+    SET(METAL_LIB    "${CMAKE_CURRENT_BINARY_DIR}/metal_depth_packet_processor.metallib")
 
-  ADD_CUSTOM_COMMAND(
-    OUTPUT ${METAL_LIB}
-    COMMAND xcrun -sdk macosx metallib ${METAL_AIR} -o ${METAL_LIB}
-    DEPENDS ${METAL_AIR}
-    COMMENT "Linking Metal library"
-    VERBATIM
-  )
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${METAL_AIR}
+      COMMAND xcrun -sdk macosx metal -c ${METAL_SOURCE} -o ${METAL_AIR}
+      DEPENDS ${METAL_SOURCE}
+      COMMENT "Compiling Metal shader to AIR"
+      VERBATIM
+    )
 
-  ADD_CUSTOM_TARGET(MetalShaders ALL DEPENDS ${METAL_LIB})
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${METAL_LIB}
+      COMMAND xcrun -sdk macosx metallib ${METAL_AIR} -o ${METAL_LIB}
+      DEPENDS ${METAL_AIR}
+      COMMENT "Linking Metal library"
+      VERBATIM
+    )
 
-  SET(LIBFREENECT2_WITH_METAL_SUPPORT 1)
-  SET(HAVE_Metal yes)
+    ADD_CUSTOM_TARGET(MetalShaders ALL DEPENDS ${METAL_LIB})
 
-  LIST(APPEND SOURCES
-    src/metal_depth_packet_processor.mm
-  )
+    SET(LIBFREENECT2_WITH_METAL_SUPPORT 1)
+    SET(HAVE_Metal yes)
 
-  LIST(APPEND LIBRARIES
-    "-framework Metal"
-    "-framework Foundation"
-  )
+    LIST(APPEND SOURCES
+      src/metal_depth_packet_processor.mm
+    )
 
-  # Mark the .mm file for Objective-C++ compilation (CMake handles this via the
-  # extension, but the explicit property guards against edge cases).
-  SET_SOURCE_FILES_PROPERTIES(src/metal_depth_packet_processor.mm
-    PROPERTIES COMPILE_FLAGS "-x objective-c++"
-  )
+    # Embed the compiled metallib into the library like the OpenCL/OpenGL
+    # kernels, so no external file has to be located at runtime.
+    LIST(APPEND RESOURCES
+      ${METAL_LIB}
+    )
 
-  # Install the compiled metallib alongside the dylib.
-  INSTALL(FILES ${METAL_LIB} DESTINATION lib)
+    LIST(APPEND LIBRARIES
+      "-framework Metal"
+      "-framework Foundation"
+    )
+
+    # The impl assumes ARC ownership semantics (releases via nil assignment).
+    SET_SOURCE_FILES_PROPERTIES(src/metal_depth_packet_processor.mm
+      PROPERTIES COMPILE_FLAGS "-x objective-c++ -fobjc-arc"
+    )
+  ELSE()
+    SET(HAVE_Metal "no (metal compiler not found; install full Xcode)")
+    MESSAGE(STATUS "Metal shader compiler not found (requires full Xcode, not just the Command Line Tools) — Metal depth processing disabled")
+  ENDIF()
 ENDIF(APPLE AND ENABLE_METAL)
 
 SET(HAVE_CUDA disabled)
 IF(ENABLE_CUDA)
-  FIND_PACKAGE(CUDA)
   SET(HAVE_CUDA no)
-  IF(CUDA_FOUND AND MSVC14 AND CUDA_VERSION VERSION_LESS 8.0)
-    SET(HAVE_CUDA "no (VS2015 not supported)")
-  ELSEIF(CUDA_FOUND)
-    SET(LIBFREENECT2_WITH_CUDA_SUPPORT 1)
-    SET(HAVE_CUDA yes)
 
-    STRING(REPLACE "\\" "/" NVCUDASAMPLES_ROOT "$ENV{NVCUDASAMPLES_ROOT}")
-    STRING(REPLACE "\\" "/" NVCUDASAMPLES8_0_ROOT "$ENV{NVCUDASAMPLES8_0_ROOT}")
-    CUDA_INCLUDE_DIRECTORIES(
-      "${MY_DIR}/include/"
-      "${CUDA_TOOLKIT_ROOT_DIR}/samples/common/inc"
-      "${NVCUDASAMPLES_ROOT}/common/inc"
-      "${NVCUDASAMPLES8_0_ROOT}/common/inc"
-    )
-    SET(CUDA_FLAGS -use_fast_math)
-    IF(NOT MSVC)
-      SET(CUDA_FLAGS "${CUDA_FLAGS} -Xcompiler -fPIC")
+  # NOTE: The CUDA depth processors #include <helper_math.h>, which used to ship
+  # with the CUDA Toolkit under samples/common/inc but is NOT bundled by modern
+  # toolkits (CUDA >= 11). If detection succeeds but the build fails on a missing
+  # helper_math.h, vendor the CUDA samples' Common dir into
+  # depends/cuda-samples/Common (from https://github.com/NVIDIA/cuda-samples) —
+  # both detection paths below add it to the include search.
+
+  # Modern path: first-class CMake CUDA language support (CMake >= 3.18).
+  # Avoids the deprecated FindCUDA module / CUDA_COMPILE machinery and works with
+  # current CUDA toolkits and host compilers. Falls back to legacy FindCUDA below.
+  IF(NOT CMAKE_VERSION VERSION_LESS 3.18)
+    INCLUDE(CheckLanguage)
+    CHECK_LANGUAGE(CUDA)
+    IF(CMAKE_CUDA_COMPILER)
+      ENABLE_LANGUAGE(CUDA)
+      FIND_PACKAGE(CUDAToolkit QUIET)
+      IF(CUDAToolkit_FOUND)
+        SET(LIBFREENECT2_WITH_CUDA_SUPPORT 1)
+        SET(HAVE_CUDA yes)
+        SET(CUDA_VERSION ${CUDAToolkit_VERSION})
+
+        # Broad default architecture set if the user did not pick one.
+        IF(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+          SET(CMAKE_CUDA_ARCHITECTURES 52 60 61 70 75 80 86 89 90)
+        ENDIF()
+
+        INCLUDE_DIRECTORIES(
+          "${MY_DIR}/include/"
+          "${CUDAToolkit_INCLUDE_DIRS}"
+          "${CUDAToolkit_TARGET_DIR}/samples/common/inc"
+          "${DEPENDS_DIR}/cuda-samples/Common"
+        )
+
+        SET_SOURCE_FILES_PROPERTIES(
+          src/cuda_depth_packet_processor.cu
+          src/cuda_kde_depth_packet_processor.cu
+          PROPERTIES COMPILE_OPTIONS "--use_fast_math"
+        )
+
+        LIST(APPEND SOURCES
+          src/cuda_depth_packet_processor.cu
+          src/cuda_kde_depth_packet_processor.cu
+        )
+
+        LIST(APPEND LIBRARIES CUDA::cudart)
+
+        MESSAGE(STATUS "Using native CMake CUDA ${CUDA_VERSION} support")
+      ENDIF()
     ENDIF()
-    IF(HAVE_CXX11 STREQUAL yes AND CUDA_VERSION VERSION_GREATER 7.0)
-      SET(CUDA_FLAGS "${CUDA_FLAGS} -std=c++11")
+  ENDIF()
+
+  # Legacy path: FindCUDA module (CMake < 3.18, or if native detection failed).
+  IF(NOT HAVE_CUDA STREQUAL yes)
+    FIND_PACKAGE(CUDA)
+    IF(CUDA_FOUND AND MSVC14 AND CUDA_VERSION VERSION_LESS 8.0)
+      SET(HAVE_CUDA "no (VS2015 not supported)")
+    ELSEIF(CUDA_FOUND)
+      SET(LIBFREENECT2_WITH_CUDA_SUPPORT 1)
+      SET(HAVE_CUDA yes)
+
+      STRING(REPLACE "\\" "/" NVCUDASAMPLES_ROOT "$ENV{NVCUDASAMPLES_ROOT}")
+      STRING(REPLACE "\\" "/" NVCUDASAMPLES8_0_ROOT "$ENV{NVCUDASAMPLES8_0_ROOT}")
+      CUDA_INCLUDE_DIRECTORIES(
+        "${MY_DIR}/include/"
+        "${CUDA_TOOLKIT_ROOT_DIR}/samples/common/inc"
+        "${NVCUDASAMPLES_ROOT}/common/inc"
+        "${NVCUDASAMPLES8_0_ROOT}/common/inc"
+        "${DEPENDS_DIR}/cuda-samples/Common"
+      )
+      SET(CUDA_FLAGS -use_fast_math)
+      IF(NOT MSVC)
+        SET(CUDA_FLAGS "${CUDA_FLAGS} -Xcompiler -fPIC")
+      ENDIF()
+      IF(HAVE_CXX11 STREQUAL yes AND CUDA_VERSION VERSION_GREATER 7.0)
+        SET(CUDA_FLAGS "${CUDA_FLAGS} -std=c++11")
+      ENDIF()
+
+      SET(OLD_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+      STRING(REGEX REPLACE "-std=c\\+\\+.." "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+      CUDA_COMPILE(CUDA_OBJECTS
+        src/cuda_depth_packet_processor.cu
+        src/cuda_kde_depth_packet_processor.cu
+        OPTIONS ${CUDA_FLAGS}
+      )
+      SET(CMAKE_CXX_FLAGS "${OLD_CMAKE_CXX_FLAGS}")
+
+      INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
+
+      LIST(APPEND SOURCES
+        ${CUDA_OBJECTS}
+      )
+
+      LIST(APPEND LIBRARIES
+        ${CUDA_LIBRARIES}
+      )
     ENDIF()
-
-    SET(OLD_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    STRING(REGEX REPLACE "-std=c\\+\\+.." "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    CUDA_COMPILE(CUDA_OBJECTS
-      src/cuda_depth_packet_processor.cu
-      src/cuda_kde_depth_packet_processor.cu
-      OPTIONS ${CUDA_FLAGS}
-    )
-    SET(CMAKE_CXX_FLAGS "${OLD_CMAKE_CXX_FLAGS}")
-
-    INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-
-    LIST(APPEND SOURCES
-      ${CUDA_OBJECTS}
-    )
-
-    LIST(APPEND LIBRARIES
-      ${CUDA_LIBRARIES}
-    )
   ENDIF()
 ENDIF(ENABLE_CUDA)
 
@@ -487,7 +558,7 @@ GENERATE_RESOURCES(${RESOURCES_INC_FILE} ${MY_DIR} ${RESOURCES})
 ADD_DEFINITIONS(-DRESOURCES_INC)
 ADD_LIBRARY(freenect2 ${SOURCES})
 
-IF(APPLE AND ENABLE_METAL AND LIBFREENECT2_WITH_METAL_SUPPORT)
+IF(LIBFREENECT2_WITH_METAL_SUPPORT)
   ADD_DEPENDENCIES(freenect2 MetalShaders)
 ENDIF()
 
