@@ -43,6 +43,7 @@ Additional guides in this repository:
 * [Using libfreenect2 from Python](doc/python.md)
 * [Registration and coordinate mapping recipes](doc/registration.md)
 * [FAQ](doc/faq.md)
+* [Recording, replay, and multiple Kinects](doc/recording_replay.md)
 
 ## Requirements
 
