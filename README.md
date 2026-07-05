@@ -39,6 +39,7 @@ The API reference documentation is provided here https://openkinect.github.io/li
 Additional guides in this repository:
 
 * [Depth accuracy and calibration](doc/depth_accuracy.md)
+* [Using the Kinect v2 as a webcam](doc/webcam.md)
 
 ## Requirements
 
