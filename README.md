@@ -1,8 +1,8 @@
 # libfreenect2
 
-[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://hbmartin.github.io/libfreenect2/)
+[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://hbmartin.github.io/libfreenect2-metal/)
 
-📖 **[Full documentation and API reference →](https://hbmartin.github.io/libfreenect2/)**
+📖 **[Full documentation and API reference →](https://hbmartin.github.io/libfreenect2-metal/)**
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@
   * [Windows / Visual Studio](README.md#windows--visual-studio)
   * [MacOS](README.md#macos)
   * [Linux](README.md#linux)
-* [Documentation site & API reference](https://hbmartin.github.io/libfreenect2/)
+* [Documentation site & API reference](https://hbmartin.github.io/libfreenect2-metal/)
 
 ## Description
 
@@ -39,7 +39,7 @@ Missing features:
 Watch the [libfreenect2 wiki](https://github.com/OpenKinect/libfreenect2/wiki) and the mailing list at https://groups.google.com/forum/#!forum/openkinect for the latest developments and more information about the K4W2 USB protocol. (The former openkinect.org domain has lapsed and now serves unrelated ads — do not use it.)
 
 The full documentation site, including the API reference and the guides below,
-is published at https://hbmartin.github.io/libfreenect2/.
+is published at https://hbmartin.github.io/libfreenect2-metal/.
 
 Additional guides (also rendered on the documentation site):
 

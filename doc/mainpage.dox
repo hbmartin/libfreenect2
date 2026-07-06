@@ -9,7 +9,7 @@ This documentation is for application developers who want to extract and use
 depth and color images from the Kinect v2. Some understanding of camera
 calibration and 3-D geometry is helpful. Questions not covered here can be
 posted to
-[GitHub issues](https://github.com/hbmartin/libfreenect2/issues).
+[GitHub issues](https://github.com/hbmartin/libfreenect2-metal/issues).
 
 Where to start
 ==============
@@ -17,7 +17,7 @@ Where to start
 - **New here?** Jump to the @ref walkthrough "API walkthrough" below for a
   guided tour of opening a device and receiving frames.
 - **Installing?** See the build and troubleshooting instructions in the
-  [README](https://github.com/hbmartin/libfreenect2#readme).
+  [README](https://github.com/hbmartin/libfreenect2-metal#readme).
 - **Solving a specific problem?** Browse the @subpage guides &mdash;
   task-oriented recipes for registration, depth accuracy, recording, Python,
   and more.
